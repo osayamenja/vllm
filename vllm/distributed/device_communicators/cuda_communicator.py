@@ -20,6 +20,9 @@ from vllm.platforms import current_platform
 from ..utils import StatelessProcessGroup
 from .base_device_communicator import DeviceCommunicatorBase
 
+from vllm.utils.torch_utils import current_stream
+import purlin
+
 logger = init_logger(__name__)
 
 
@@ -84,6 +87,12 @@ class CudaCommunicator(DeviceCommunicatorBase):
         self.qr_comm: QuickAllReduce | None = None
         self.symm_mem_comm: SymmMemCommunicator | None = None
         self.fi_ar_comm: FlashInferAllReduce | None = None
+        self.purlin_handle: purlin.ContextHandle = purlin.initialize(
+            group=self.device_group,
+            device=self.device,
+            arch=90,
+            stream_ptr=current_stream().cuda_stream,
+        )
 
         if use_torch_symm_mem and current_platform.is_cuda():
             self.symm_mem_comm = SymmMemCommunicator(
@@ -175,8 +184,9 @@ class CudaCommunicator(DeviceCommunicatorBase):
                 raise ValueError(f"Unknown all2all backend: {self.all2all_backend}")
 
             logger.info_once(
-                "Using %s all2all manager.",
+                "Using %s all2all manager and Purlin Context %s",
                 self.all2all_manager.__class__.__name__,
+                self.purlin_handle,
                 scope="global",
             )
 
@@ -322,7 +332,13 @@ class CudaCommunicator(DeviceCommunicatorBase):
             output_shape, dtype=input_tensor.dtype, device=input_tensor.device
         )
 
-        pynccl_comm.reduce_scatter(output, input_tensor)
+        # pynccl_comm.reduce_scatter(output, input_tensor)
+        purlin.reduce_scatter(
+            input_tensor,
+            output,
+            self.purlin_handle,
+            current_stream().cuda_stream,
+        )
 
         # Reshape before returning
         return output.movedim(0, dim).contiguous()
@@ -411,6 +427,9 @@ class CudaCommunicator(DeviceCommunicatorBase):
         if self.fi_ar_comm is not None:
             self.fi_ar_comm.destroy()
             self.fi_ar_comm = None
+        if self.purlin_handle is not None:
+            purlin.finalize(self.purlin_handle, current_stream().cuda_stream)
+            self.purlin_handle = None  # type: ignore[assignment]
         if self.all2all_manager is not None:
             self.all2all_manager.destroy()
             self.all2all_manager = None  # type: ignore[assignment]
@@ -449,7 +468,13 @@ class CudaCommunicator(DeviceCommunicatorBase):
             if sizes is not None:
                 pynccl_comm.all_gatherv(output_tensor, input_, sizes=sizes)
             else:
-                pynccl_comm.all_gather(output_tensor, input_)
+                purlin.all_gather(
+                    input_,
+                    output_tensor,
+                    self.purlin_handle,
+                    current_stream().cuda_stream,
+                )
+                # pynccl_comm.all_gather(output_tensor, input_)
             return output_tensor
 
         if isinstance(input_, torch.Tensor):
