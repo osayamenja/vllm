@@ -493,6 +493,7 @@ class EngineArgs:
     )
     eplb_config: EPLBConfig = get_field(ParallelConfig, "eplb_config")
     enable_eplb: bool = ParallelConfig.enable_eplb
+    enable_purlin: bool = ParallelConfig.enable_purlin
     expert_placement_strategy: ExpertPlacementStrategy = (
         ParallelConfig.expert_placement_strategy
     )
@@ -1062,6 +1063,11 @@ class EngineArgs:
             "--enable-expert-parallel",
             "-ep",
             **parallel_kwargs["enable_expert_parallel"],
+        )
+        parallel_group.add_argument(
+            "--enable-purlin",
+            action="store_true",
+            default=False
         )
         parallel_group.add_argument(
             "--enable-ep-weight-filter",
@@ -1988,6 +1994,7 @@ class EngineArgs:
             dbo_prefill_token_threshold=self.dbo_prefill_token_threshold,
             disable_nccl_for_dp_synchronization=self.disable_nccl_for_dp_synchronization,
             enable_eplb=self.enable_eplb,
+            enable_purlin=self.enable_purlin,
             eplb_config=self.eplb_config,
             expert_placement_strategy=self.expert_placement_strategy,
             max_parallel_loading_workers=self.max_parallel_loading_workers,

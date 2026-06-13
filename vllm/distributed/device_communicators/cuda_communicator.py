@@ -87,12 +87,16 @@ class CudaCommunicator(DeviceCommunicatorBase):
         self.qr_comm: QuickAllReduce | None = None
         self.symm_mem_comm: SymmMemCommunicator | None = None
         self.fi_ar_comm: FlashInferAllReduce | None = None
-        self.purlin_handle: purlin.ContextHandle = purlin.initialize(
-            group=self.device_group,
-            device=self.device,
-            arch=90,
-            stream_ptr=current_stream().cuda_stream,
-        )
+        self.purlin_handle: purlin.ContextHandle | None = None
+        if self.enable_purlin:
+            a_maj, a_minor = torch.cuda.get_device_capability(self.device)
+            arch = a_maj * 10 + a_minor
+            self.purlin_handle = purlin.initialize(
+                group=self.device_group,
+                device=self.device,
+                arch=arch,
+                stream_ptr=current_stream().cuda_stream,
+            )
 
         if use_torch_symm_mem and current_platform.is_cuda():
             self.symm_mem_comm = SymmMemCommunicator(
@@ -184,11 +188,16 @@ class CudaCommunicator(DeviceCommunicatorBase):
                 raise ValueError(f"Unknown all2all backend: {self.all2all_backend}")
 
             logger.info_once(
-                "Using %s all2all manager and Purlin Context %s",
+                "Using %s all2all manager",
                 self.all2all_manager.__class__.__name__,
-                self.purlin_handle,
-                scope="global",
+                scope="global"
             )
+            if self.enable_purlin:
+                logger.info_once(
+                    "Using Purlin Context %s",
+                    self.purlin_handle,
+                    scope="global"
+                )
 
     def _log_all_reduce_backend_selection(self) -> None:
         """Log the all-reduce backends that are active for this group.
@@ -273,6 +282,10 @@ class CudaCommunicator(DeviceCommunicatorBase):
             out = qr_comm.quick_all_reduce(input_)
             assert out is not None
             return out
+        if self.enable_purlin:
+            out_tensor = torch.empty_like(input_)
+            purlin.all_reduce(input_, out_tensor, self.purlin_handle, current_stream().cuda_stream)
+            return out_tensor
         fi_ar_comm = self.fi_ar_comm
         if (
             fi_ar_comm is not None
@@ -331,15 +344,15 @@ class CudaCommunicator(DeviceCommunicatorBase):
         output = torch.empty(
             output_shape, dtype=input_tensor.dtype, device=input_tensor.device
         )
-
-        # pynccl_comm.reduce_scatter(output, input_tensor)
-        purlin.reduce_scatter(
-            input_tensor,
-            output,
-            self.purlin_handle,
-            current_stream().cuda_stream,
-        )
-
+        if self.enable_purlin:
+            purlin.reduce_scatter(
+                input_tensor,
+                output,
+                self.purlin_handle,
+                current_stream().cuda_stream,
+            )
+            return output
+        pynccl_comm.reduce_scatter(output, input_tensor)
         # Reshape before returning
         return output.movedim(0, dim).contiguous()
 
@@ -373,6 +386,14 @@ class CudaCommunicator(DeviceCommunicatorBase):
         if sizes is not None and sizes.count(sizes[0]) != len(sizes):
             pynccl_comm.reduce_scatterv(output, input_tensor, sizes=sizes)
         else:
+            if self.enable_purlin:
+                purlin.reduce_scatter(
+                    input_tensor,
+                    output,
+                    self.purlin_handle,
+                    current_stream().cuda_stream,
+                )
+                return output
             pynccl_comm.reduce_scatter(output, input_tensor)
 
         # Reshape before returning
@@ -468,13 +489,15 @@ class CudaCommunicator(DeviceCommunicatorBase):
             if sizes is not None:
                 pynccl_comm.all_gatherv(output_tensor, input_, sizes=sizes)
             else:
-                purlin.all_gather(
-                    input_,
-                    output_tensor,
-                    self.purlin_handle,
-                    current_stream().cuda_stream,
-                )
-                # pynccl_comm.all_gather(output_tensor, input_)
+                if self.enable_purlin:
+                    purlin.all_gather(
+                        input_,
+                        output_tensor,
+                        self.purlin_handle,
+                        current_stream().cuda_stream,
+                    )
+                    return output_tensor
+                pynccl_comm.all_gather(output_tensor, input_)
             return output_tensor
 
         if isinstance(input_, torch.Tensor):

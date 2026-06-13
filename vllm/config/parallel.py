@@ -161,6 +161,10 @@ class ParallelConfig:
     effect on 3D fused-expert checkpoints (e.g. GPT-OSS) or non-MoE
     models."""
     enable_eplb: bool = False
+    """
+    enable Purlin communication library
+    """
+    enable_purlin: bool = False
     """Enable expert parallelism load balancing for MoE layers."""
     eplb_config: EPLBConfig = Field(default_factory=EPLBConfig)
     """Expert parallelism configuration."""

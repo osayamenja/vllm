@@ -165,16 +165,19 @@ class DeviceCommunicatorBase:
         from vllm.config import get_current_vllm_config_or_none
 
         config = get_current_vllm_config_or_none()
+        enable_purlin = False
         if config is not None:
             # as long as we use data parallel (coupled data parallel
             # where all data parallel ranks execute forward together),
             # we initialize the all2all manager used in expert parallel.
             use_ep = config.parallel_config.data_parallel_size > 1
             all2all_backend = config.parallel_config.all2all_backend
+            enable_purlin = config.parallel_config.enable_purlin
 
         self.is_ep_communicator = unique_name.split(":")[0] == "ep"
         self.use_all2all = self.is_ep_communicator and use_ep
         self.all2all_backend = all2all_backend
+        self.enable_purlin = enable_purlin
         self.all2all_manager: All2AllManagerBase | None = None
 
     def all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
