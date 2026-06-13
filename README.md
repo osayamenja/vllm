@@ -20,14 +20,18 @@ For events, please visit [vllm.ai/events](https://vllm.ai/events) to join us.
 ---
 
 ## How to Install This Fork
-This is a fork that integrates purlin into vLLM as a communication backend.
-Steps to install this fork are listed below
+This repository is a fork integrating purlin into vLLM as a communication backend.
+### Requirements
+- CUDA 12 or 13
+- Purlin has a JIT compilation phase that requires `ninja` and `CMake`, so these need to be installed.
+### Installation Steps
 - Install `uv` from [here](https://docs.astral.sh/uv/getting-started/installation/)
 - create and activate a `uv` venv using the below
     ```bash
     uv venv --python 3.12 --seed --managed-python
     source .venv/bin/activate
     ```
+- Install purlin: `uv pip install purlin`
 - Install torch:
   - CUDA 12
   ```bash
@@ -51,6 +55,9 @@ Steps to install this fork are listed below
   (.venv) osayamen@jonathan:~$ vllm --version
   0.1.dev17289+g063ce98fb.precompiled
     ```
+
+## Using Purlin
+Like so: `vllm serve --enable-purlin ...`
 ## About
 
 vLLM is a fast and easy-to-use library for LLM inference and serving.
